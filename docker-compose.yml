@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  fop-model:
+    build: .
+    container_name: virtual-fop
+    volumes:
+      - .:/app          # mount current directory so you can edit the script easily
+      - ./results:/app/results
+      - ./virtual_fop_montecarlo.py:/app/virtual_fop_montecarlo.py
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Uncomment the next lines if you have an NVIDIA GPU and want CUDA
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: python virtual_fop_montecarlo.py
+    shm_size: '2gb' 
