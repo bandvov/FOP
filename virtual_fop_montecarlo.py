@@ -40,9 +40,16 @@ except ImportError:
     print("PyTorch not found – using SciPy (CPU only)")
 
 
-def save_checkpoint(results, processed, total, checkpoint_dir="checkpoints"):
-    """Save current progress so the run can be resumed later."""
-    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+def save_checkpoint(results, processed, total, checkpoint_dir="checkpoints", keep_last=2):
+    """
+    Save progress using rotating checkpoints.
+    Only the most recent `keep_last` checkpoints are retained.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    filename = checkpoint_dir / f"fop_checkpoint_{timestamp}_{processed}.json"
 
     checkpoint = {
         "processed": processed,
@@ -60,20 +67,34 @@ def save_checkpoint(results, processed, total, checkpoint_dir="checkpoints"):
             checkpoint["results"][name]["n_flares"] = [
                 int(x) for x in data["n_flares"]]
 
-    path = Path(checkpoint_dir) / "fop_checkpoint.json"
-    with open(path, "w") as f:
+    # Write new checkpoint
+    with open(filename, "w") as f:
         json.dump(checkpoint, f)
 
-    print(f"  → Checkpoint saved ({processed}/{total} realizations)")
+    print(f"  → Checkpoint saved: {filename.name} ({processed}/{total})")
+
+    # ----- Keep only the last N checkpoints -----
+    checkpoints = sorted(checkpoint_dir.glob("fop_checkpoint_*.json"))
+    if len(checkpoints) > keep_last:
+        for old in checkpoints[:-keep_last]:
+            old.unlink()
+            print(f"  → Removed old checkpoint: {old.name}")
 
 
 def load_checkpoint(checkpoint_dir="checkpoints"):
-    """Load previous progress if a checkpoint exists."""
-    path = Path(checkpoint_dir) / "fop_checkpoint.json"
-    if not path.exists():
+    """
+    Load the most recent checkpoint (if any).
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoints = sorted(checkpoint_dir.glob("fop_checkpoint_*.json"))
+
+    if not checkpoints:
         return None, 0
 
-    with open(path, "r") as f:
+    latest = checkpoints[-1]
+    print(f"Found checkpoint: {latest.name}")
+
+    with open(latest, "r") as f:
         checkpoint = json.load(f)
 
     results = {}
@@ -86,7 +107,7 @@ def load_checkpoint(checkpoint_dir="checkpoints"):
             results[name]["n_flares"] = data["n_flares"]
 
     processed = checkpoint["processed"]
-    print(f"Resuming from checkpoint: {processed} realizations already done.")
+    print(f"Resuming from {processed} realizations.")
     return results, processed
 
 # ============================================================
