@@ -12,6 +12,10 @@ Features included:
 - Homeostatic repair score
 """
 
+import json
+from pathlib import Path
+import time
+
 from save_results import save_results
 from silencing_sweep import silencing_scenarios
 from top8_scenarios import top8_scenarios
@@ -36,9 +40,60 @@ except ImportError:
     print("PyTorch not found – using SciPy (CPU only)")
 
 
+def save_checkpoint(results, processed, total, checkpoint_dir="checkpoints"):
+    """Save current progress so the run can be resumed later."""
+    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+
+    checkpoint = {
+        "processed": processed,
+        "total": total,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "results": {}
+    }
+
+    for name, data in results.items():
+        checkpoint["results"][name] = {
+            "HO": [float(x) for x in data["HO"]],
+            "repair": [float(x) for x in data["repair"]],
+        }
+        if "n_flares" in data:
+            checkpoint["results"][name]["n_flares"] = [
+                int(x) for x in data["n_flares"]]
+
+    path = Path(checkpoint_dir) / "fop_checkpoint.json"
+    with open(path, "w") as f:
+        json.dump(checkpoint, f)
+
+    print(f"  → Checkpoint saved ({processed}/{total} realizations)")
+
+
+def load_checkpoint(checkpoint_dir="checkpoints"):
+    """Load previous progress if a checkpoint exists."""
+    path = Path(checkpoint_dir) / "fop_checkpoint.json"
+    if not path.exists():
+        return None, 0
+
+    with open(path, "r") as f:
+        checkpoint = json.load(f)
+
+    results = {}
+    for name, data in checkpoint["results"].items():
+        results[name] = {
+            "HO": data["HO"],
+            "repair": data["repair"],
+        }
+        if "n_flares" in data:
+            results[name]["n_flares"] = data["n_flares"]
+
+    processed = checkpoint["processed"]
+    print(f"Resuming from checkpoint: {processed} realizations already done.")
+    return results, processed
+
 # ============================================================
 # 1. Stochastic flare generator
 # ============================================================
+
+
 def generate_poisson_flares(T, rate_per_unit=0.05, intensity=2.6, rng=None):
     if rng is None:
         rng = np.random.default_rng()
@@ -221,29 +276,50 @@ def integrate_batch_torch(y0_batch, t_eval, p, flare_times_list, flare_intensity
 # ============================================================
 # 4. Ensemble runner
 # ============================================================
-def run_ensemble(n_realizations=200, T_end=100.0, seed=42, use_cuda=True):
+def run_ensemble(n_realizations=200, T_end=100.0, seed=42, use_cuda=True,
+                 checkpoint_every=500, checkpoint_dir="checkpoints"):
+    """
+    Monte-Carlo ensemble with periodic checkpointing.
+
+    checkpoint_every : save progress every N realizations
+    """
     rng = np.random.default_rng(seed)
     t_eval = np.linspace(0, T_end, 300)
 
     y0 = np.array([0.35, 0.18, 0.08, 0.04, 0.45,
                   0.0, 0.55, 0.0], dtype=np.float32)
 
-    scenarios = {**combined_sweep_scenarios, **silencing_scenarios, **top8_scenarios, **baseline_scenarios}
+    # ----- Define your scenarios here -----
+    scenarios = {
+        **baseline_scenarios,
+        **silencing_scenarios,
+        **top8_scenarios,
+        **combined_sweep_scenarios
+    }
 
-    results = {name: {"HO": [], "repair": []} for name in scenarios}
+    # Try to resume from checkpoint
+    results, already_done = load_checkpoint(checkpoint_dir)
+    if results is None:
+        results = {name: {"HO": [], "repair": []} for name in scenarios}
+        already_done = 0
+
+    remaining = n_realizations - already_done
+    if remaining <= 0:
+        print("All realizations already completed.")
+        return results
 
     use_gpu = TORCH_AVAILABLE and use_cuda and torch.cuda.is_available()
+
     if use_gpu:
-        print(f"Running on CUDA ({n_realizations} realizations)...")
+        print(f"Running on CUDA | remaining: {remaining} realizations")
         device = torch.device("cuda")
         t_torch = torch.tensor(t_eval, dtype=torch.float32, device=device)
+        batch_size = 128          # adjust to your GPU memory
 
-        # We process in mini-batches to avoid OOM
-        batch_size = 64
-        for start in range(0, n_realizations, batch_size):
-            end = min(start + batch_size, n_realizations)
-            current_batch = end - start
-            print(f"  Batch {start}-{end}")
+        processed = already_done
+        while processed < n_realizations:
+            current_batch = min(batch_size, n_realizations - processed)
+            print(f"  Batch {processed}-{processed + current_batch}")
 
             flare_lists = []
             for _ in range(current_batch):
@@ -254,17 +330,25 @@ def run_ensemble(n_realizations=200, T_end=100.0, seed=42, use_cuda=True):
                 0).repeat(current_batch, 1)
 
             for name, p in scenarios.items():
-                # Convert p values to tensors / floats
                 p_torch = {k: float(v) for k, v in p.items()}
                 traj = integrate_batch_torch(
                     y0_batch, t_torch, p_torch, flare_lists, 2.6, device)
-                final = traj[:, -1, :]          # (batch, 8)
+                final = traj[:, -1, :]
                 results[name]["HO"].extend(final[:, 5].cpu().numpy().tolist())
                 results[name]["repair"].extend(
                     final[:, 6].cpu().numpy().tolist())
+
+            processed += current_batch
+
+            # ----- Checkpoint -----
+            if processed % checkpoint_every < batch_size or processed >= n_realizations:
+                save_checkpoint(results, processed,
+                                n_realizations, checkpoint_dir)
+
     else:
-        print(f"Running on CPU with SciPy ({n_realizations} realizations)...")
-        for i in range(n_realizations):
+        # CPU fallback with checkpointing
+        print(f"Running on CPU | remaining: {remaining} realizations")
+        for i in range(already_done, n_realizations):
             if (i + 1) % 50 == 0:
                 print(f"  {i+1}/{n_realizations}")
             flare_times, flare_int = generate_poisson_flares(T_end, rng=rng)
@@ -276,6 +360,9 @@ def run_ensemble(n_realizations=200, T_end=100.0, seed=42, use_cuda=True):
                 results[name]["HO"].append(sol[-1, 5])
                 results[name]["repair"].append(np.mean(sol[:, 6]))
 
+            if (i + 1) % checkpoint_every == 0 or (i + 1) == n_realizations:
+                save_checkpoint(results, i + 1, n_realizations, checkpoint_dir)
+
     return results
 
 
@@ -284,7 +371,14 @@ def run_ensemble(n_realizations=200, T_end=100.0, seed=42, use_cuda=True):
 # ============================================================
 if __name__ == "__main__":
     results = run_ensemble(
-        n_realizations=10000, T_end=100.0, seed=42, use_cuda=True)
+        # save every 1000 realizations
+        n_realizations=10000,
+        T_end=100.0,
+        seed=42,
+        use_cuda=True,
+        checkpoint_every=1000,
+        checkpoint_dir="checkpoints"
+    )
 
     print("\n" + "=" * 70)
     print(f"{'Scenario':<30} {'HO mean':>10} {'HO std':>8} {'Repair mean':>12}")
