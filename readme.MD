@@ -228,7 +228,8 @@ Left = HO (lower better) · Right = Repair (higher better)
 - Global sensitivity analysis (Sobol indices)
 - Direct calibration against published mouse HO volumes and patient CT natural-history data
 ---
-## LicenseThis is a research / educational computational model.
+## License
+This is a research / educational computational model.
 You are free to use, modify, and extend it for non-commercial scientific purposes.
 ---
 Happy modeling — and good luck in the search for better FOP therapies.
