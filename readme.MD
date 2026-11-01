@@ -152,15 +152,14 @@ Sil × Kin HeatmapLeft heatmap = HO mean · Right heatmap = Repair mean
 
 ---
 
-|Interpreting|ResultsMetric|
-|------------|-------------|
-|Meaning|Desired direction|
-|HO mean / std|Final heterotopic bone volume|
-|Lower|Repair mean|
-|Homeostatic / normal healing capacity|Higher|
-|HO 5–95%|Spread across random flare sequences|
-|Narrower better|Strong control rate|
-|Probability of low HO + good repair|Closer to 100%|
+## Interpreting Results
+
+|Metric|Meaning|Desired direction|
+|------|-------|-----------------|
+|HO mean / std|Final heterotopic bone volume|Lower|
+|Repair mean|Homeostatic / normal healing capacity|Higher|
+|HO 5–95%|Spread across random flare sequences|Narrower better|
+|Strong control rate|Probability of low HO + good repair|Closer to 100%|
 
 ---
 
@@ -198,9 +197,10 @@ Left = HO (lower better) · Right = Repair (higher better)
 ---
 ## Top Performing Strategies
 |Rank|Strategy|HO mean|Repair mean|Notes|
-|-------------|-------|-----------|-----|
-|1|Minimal_Drug_Max_Genetics|0.318|5.510||Best overall balance|
-|2|DeepSil_StrongProt_NoGT|0.665|5.470||Excellent without gene therapy|3|GT55_Sil010_StrongProt|0.682|5.493|Strong realistic GT combination|
+|----|--------|-------|-----------|-----|
+|1|Minimal_Drug_Max_Genetics|0.318|5.510|Best overall balance|
+|2|DeepSil_StrongProt_NoGT|0.665|5.470|Excellent without gene therapy|
+|3|GT55_Sil010_StrongProt|0.682|5.493|Strong realistic GT combination|
 |4|Aggressive_Cure_Seeking|0.059|2.223|Lowest HO observed|
 |5|Theoretical_Optimum|0.112|2.956|Very strong multi-modal approach|
 |6|DeepSil_MildProtective|1.189|4.100|Best simple protective strategy|
